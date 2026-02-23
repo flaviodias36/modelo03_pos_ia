@@ -14,7 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      netflix_embeddings: {
+        Row: {
+          created_at: string
+          description: string | null
+          embedding: number[]
+          id: string
+          listed_in: string | null
+          show_id: string
+          title: string
+          type: string | null
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          embedding: number[]
+          id?: string
+          listed_in?: string | null
+          show_id: string
+          title: string
+          type?: string | null
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          embedding?: number[]
+          id?: string
+          listed_in?: string | null
+          show_id?: string
+          title?: string
+          type?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
