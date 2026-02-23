@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Header } from "@/components/Header";
 import { MovieCard } from "@/components/MovieCard";
 import { filterOptions, type MovieRecommendation } from "@/mock/movies";
@@ -19,7 +19,6 @@ const apiCall = async (params: Record<string, string>, opts?: RequestInit) => {
   return data;
 };
 
-// Same vectorization used in training — must match exactly
 const textToInputVector = (text: string): number[] => {
   const vec = new Array(256).fill(0);
   const clean = text.toLowerCase().replace(/[^a-záàâãéèêíïóôõöúçñ\s0-9]/g, "");
@@ -30,7 +29,6 @@ const textToInputVector = (text: string): number[] => {
   return vec.map(v => v / max);
 };
 
-// TF.js model for embedding generation (same architecture as training)
 let tfModel: any = null;
 
 const buildModel = async (tf: any) => {
@@ -42,42 +40,34 @@ const buildModel = async (tf: any) => {
   return model;
 };
 
-const generateQueryEmbedding = async (text: string): Promise<number[]> => {
-  const tf = await import("@tensorflow/tfjs");
-  await tf.ready();
-  if (!tfModel) tfModel = await buildModel(tf);
-
-  const inputVec = textToInputVector(text);
-  const inputTensor = tf.tensor2d([inputVec], [1, 256]);
-  const outputTensor = tfModel.predict(inputTensor) as any;
-  const embedding = Array.from(await outputTensor.data()) as number[];
-  inputTensor.dispose();
-  outputTensor.dispose();
-
-  const mag = Math.sqrt(embedding.reduce((s, v) => s + v * v, 0));
-  return mag > 0 ? embedding.map(v => v / mag) : embedding;
-};
-
 const TestRecommendation = () => {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<MovieRecommendation[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [processingStep, setProcessingStep] = useState("");
+  const [logs, setLogs] = useState<string[]>([]);
+  const logRef = useRef<HTMLDivElement>(null);
 
-  // Filter state
   const [typeFilter, setTypeFilter] = useState("");
   const [genreFilter, setGenreFilter] = useState("");
   const [toneFilter, setToneFilter] = useState("");
   const [durationFilter, setDurationFilter] = useState("");
   const [countryFilter, setCountryFilter] = useState("");
 
+  const addLog = useCallback((msg: string) => {
+    setLogs((prev) => [...prev, msg]);
+  }, []);
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [logs]);
+
   const handleGenerate = useCallback(async () => {
     setLoading(true);
     setResults([]);
     setError(null);
+    setLogs([]);
 
     try {
-      // Build a text query from the selected filters
       const queryParts: string[] = [];
       if (typeFilter) queryParts.push(typeFilter);
       if (genreFilter) queryParts.push(genreFilter);
@@ -92,11 +82,43 @@ const TestRecommendation = () => {
       }
 
       const queryText = queryParts.join(" ");
+      addLog(`Critérios selecionados: ${queryParts.join(", ")}`);
+      addLog(`Texto de consulta gerado: "${queryText}"`);
 
-      setProcessingStep("Carregando TensorFlow.js e gerando embedding da consulta...");
-      const queryEmbedding = await generateQueryEmbedding(queryText);
+      addLog("Inicializando TensorFlow.js...");
+      const tf = await import("@tensorflow/tfjs");
+      await tf.ready();
+      addLog(`✓ TensorFlow.js v${tf.version.tfjs} carregado (backend: ${tf.getBackend()})`);
 
-      setProcessingStep("Calculando similaridade de cosseno contra todos os vetores do banco...");
+      if (!tfModel) {
+        addLog("Construindo rede neural: 256→512→256→128...");
+        tfModel = await buildModel(tf);
+        addLog("✓ Modelo sequential criado (3 camadas Dense)");
+      } else {
+        addLog("✓ Modelo reutilizado da sessão anterior");
+      }
+
+      addLog("Vetorizando texto de consulta (bag-of-characters 256-dim)...");
+      const inputVec = textToInputVector(queryText);
+      const nonZero = inputVec.filter(v => v > 0).length;
+      addLog(`✓ Vetor de entrada gerado — ${nonZero} dimensões ativas de 256`);
+
+      addLog("Gerando embedding de 128-dim via forward pass na rede neural...");
+      const inputTensor = tf.tensor2d([inputVec], [1, 256]);
+      const outputTensor = tfModel.predict(inputTensor) as any;
+      const embedding = Array.from(await outputTensor.data()) as number[];
+      inputTensor.dispose();
+      outputTensor.dispose();
+
+      const mag = Math.sqrt(embedding.reduce((s, v) => s + v * v, 0));
+      const queryEmbedding = mag > 0 ? embedding.map(v => v / mag) : embedding;
+      addLog(`✓ Embedding normalizado (norma L2 = ${mag.toFixed(4)} → 1.0)`);
+      addLog(`  Primeiros 5 valores: [${queryEmbedding.slice(0, 5).map(v => v.toFixed(4)).join(", ")}...]`);
+
+      addLog("Enviando embedding ao banco externo para cálculo de similaridade de cosseno...");
+      addLog(`  Filtros SQL: ${typeFilter ? `type='${typeFilter}'` : "sem filtro de tipo"} | ${genreFilter ? `listed_in ILIKE '%${genreFilter}%'` : "sem filtro de gênero"}`);
+      
+      const t0 = performance.now();
       const data = await apiCall({ action: "recommend" }, {
         method: "POST",
         body: JSON.stringify({
@@ -106,6 +128,7 @@ const TestRecommendation = () => {
           genre_filter: genreFilter,
         }),
       });
+      const elapsed = Math.round(performance.now() - t0);
 
       const recommendations: MovieRecommendation[] = (data.recommendations || []).map((r: any) => ({
         title: r.title || "Sem título",
@@ -116,15 +139,26 @@ const TestRecommendation = () => {
         description: r.description || "",
       }));
 
+      addLog(`✓ Consulta concluída em ${elapsed}ms — ${recommendations.length} resultados retornados`);
+      
+      if (recommendations.length > 0) {
+        addLog(`  🏆 Melhor match: "${recommendations[0].title}" (${Math.round(recommendations[0].similarity * 100)}%)`);
+        addLog(`  📊 Faixa de similaridade: ${Math.round(recommendations[recommendations.length - 1].similarity * 100)}% — ${Math.round(recommendations[0].similarity * 100)}%`);
+        addLog(`  📐 Média: ${Math.round((recommendations.reduce((s, r) => s + r.similarity, 0) / recommendations.length) * 100)}%`);
+        recommendations.forEach((r, i) => {
+          addLog(`  ${i + 1}. ${r.title} — ${Math.round(r.similarity * 100)}% (${r.genre})`);
+        });
+      }
+
+      addLog("✓ Processo de recomendação finalizado com sucesso!");
       setResults(recommendations);
-      setProcessingStep("");
     } catch (err: any) {
+      addLog(`✗ Erro: ${err.message}`);
       setError(err.message);
-      setProcessingStep("");
     } finally {
       setLoading(false);
     }
-  }, [typeFilter, genreFilter, toneFilter, durationFilter, countryFilter]);
+  }, [typeFilter, genreFilter, toneFilter, durationFilter, countryFilter, addLog]);
 
   const SelectField = ({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: string[] }) => (
     <div>
@@ -176,11 +210,8 @@ const TestRecommendation = () => {
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               {loading ? "Processando..." : "Gerar Recomendações"}
-            </button>
-            {processingStep && (
-              <span className="text-xs text-muted-foreground animate-pulse">{processingStep}</span>
-            )}
-          </div>
+          </button>
+        </div>
         </motion.div>
 
         {/* Error */}
@@ -190,6 +221,26 @@ const TestRecommendation = () => {
             <span className="text-destructive font-medium text-sm">{error}</span>
           </motion.div>
         )}
+
+        {/* Logs */}
+        <AnimatePresence>
+          {logs.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card border border-border overflow-hidden">
+              <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${loading ? "bg-primary animate-pulse" : "bg-success"}`} />
+                <h3 className="font-display font-semibold text-foreground text-sm">Log do Processo de Recomendação</h3>
+              </div>
+              <div ref={logRef} className="p-4 max-h-60 overflow-y-auto scrollbar-thin font-mono text-xs space-y-1">
+                {logs.map((log, i) => (
+                  <motion.div key={i} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className={`py-0.5 ${log.startsWith("✓") ? "text-success" : log.startsWith("✗") ? "text-destructive" : log.startsWith("  🏆") || log.startsWith("  📊") || log.startsWith("  📐") ? "text-primary" : "text-muted-foreground"}`}>
+                    <span className="text-primary/60 mr-2">[{new Date().toLocaleTimeString()}]</span>
+                    {log}
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Results */}
         <AnimatePresence>
