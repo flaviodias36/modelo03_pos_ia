@@ -54,7 +54,7 @@ const TrainModel = () => {
     try {
       const [countData, embData] = await Promise.all([
         apiCall("external-db", { action: "count" }),
-        apiCall("train-model", { action: "embedding-count" }),
+        apiCall("external-db", { action: "embedding-count" }),
       ]);
       const total = Number(countData.total);
       const vec = Number(embData.count);
@@ -84,6 +84,10 @@ const TrainModel = () => {
       const tf = await import("@tensorflow/tfjs");
       await tf.ready();
       addLog(`✓ TensorFlow.js v${tf.version.tfjs} carregado (backend: ${tf.getBackend()})`);
+
+      addLog("Criando/verificando tabela netflix_embeddings no banco externo...");
+      await apiCall("external-db", { action: "create-embeddings-table" });
+      addLog("✓ Tabela netflix_embeddings pronta no banco externo");
 
       addLog("Conectando ao banco de dados externo...");
       const countData = await apiCall("external-db", { action: "count" });
@@ -121,7 +125,7 @@ const TrainModel = () => {
         });
 
         addLog(`Salvando ${embeddingsToStore.length} embeddings...`);
-        await apiCall("train-model", { action: "store-embeddings" }, {
+        await apiCall("external-db", { action: "store-embeddings" }, {
           method: "POST",
           body: JSON.stringify({ embeddings: embeddingsToStore }),
         });
