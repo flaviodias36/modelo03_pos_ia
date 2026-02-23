@@ -106,6 +106,35 @@ serve(async (req) => {
       });
     }
 
+    if (action === "dashboard-stats") {
+      const totalResult = await sql`SELECT COUNT(*)::int as total FROM netflix_titles`;
+      const embResult = await sql`SELECT COUNT(*)::int as total FROM netflix_embeddings`.catch(() => [{ total: 0 }]);
+      const distResult = await sql`
+        SELECT type, COUNT(*)::int as count 
+        FROM netflix_titles 
+        GROUP BY type 
+        ORDER BY count DESC
+      `;
+      const topResult = await sql`
+        SELECT title, type, listed_in 
+        FROM netflix_embeddings 
+        ORDER BY created_at DESC 
+        LIMIT 5
+      `.catch(() => []);
+      
+      const total = Number(totalResult[0].total);
+      const embedded = Number(embResult[0]?.total || 0);
+      const distribution = distResult.map((r: any) => ({ name: r.type, count: Number(r.count) }));
+      const latest = topResult.map((r: any) => ({ title: r.title, type: r.type, listed_in: r.listed_in }));
+
+      await sql.end();
+      return new Response(JSON.stringify({ 
+        success: true, total, embedded, pending: total - embedded, distribution, latest 
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-cache, no-store" },
+      });
+    }
+
     if (action === "preview") {
       const limit = url.searchParams.get("limit") || "10";
       const offset = url.searchParams.get("offset") || "0";
