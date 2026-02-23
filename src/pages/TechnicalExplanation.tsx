@@ -1,6 +1,6 @@
 import { Header } from "@/components/Header";
 import { motion } from "framer-motion";
-import { Brain, Database, BarChart3, GitCompare, Sparkles, Code2 } from "lucide-react";
+import { Brain, Database, BarChart3, GitCompare, Sparkles, Code2, Search } from "lucide-react";
 
 const sections = [
   {
@@ -32,6 +32,12 @@ const sections = [
     title: "Aplicações Reais",
     content:
       "Netflix usa deep learning e collaborative filtering para personalizar 80% do conteúdo assistido. Amazon combina item-to-item collaborative filtering com análise de histórico de compras. Spotify usa embeddings de áudio (CNN) e análise de playlists colaborativas para Discover Weekly. YouTube emprega um modelo de duas torres (candidato + ranking) com billions de parâmetros. Todas essas plataformas investem pesadamente em representações vetoriais para melhorar recomendações.",
+  },
+  {
+    icon: Search,
+    title: "Função de Recomendação por Similaridade",
+    content:
+      "A função de recomendação recebe os critérios do usuário (tipo, gênero, tom, duração, país), concatena-os em uma string de consulta e gera um embedding de 128 dimensões usando a mesma rede neural TensorFlow.js treinada anteriormente. Esse vetor de consulta é então enviado ao banco de dados PostgreSQL externo, onde a similaridade de cosseno é calculada diretamente em SQL contra todos os vetores armazenados na tabela netflix_embeddings. A fórmula cos(A,B) = (A·B) / (||A|| × ||B||) retorna valores entre 0 e 1, onde 1 significa conteúdo idêntico. Os resultados são ordenados pela maior similaridade e retornados com a porcentagem de acurácia de cada indicação, permitindo ao usuário avaliar a relevância de cada recomendação.",
   },
 ];
 

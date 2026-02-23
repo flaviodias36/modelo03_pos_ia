@@ -177,6 +177,47 @@ serve(async (req) => {
       }
     }
 
+    if (action === "recommend" && req.method === "POST") {
+      const { embedding, limit: recLimit, type_filter, genre_filter } = await req.json();
+      const topN = recLimit || 10;
+      
+      // Build dynamic query with optional filters
+      let filterClauses = "";
+      if (type_filter && type_filter !== "") {
+        filterClauses += ` AND e.type = '${type_filter.replace(/'/g, "''")}'`;
+      }
+      if (genre_filter && genre_filter !== "") {
+        filterClauses += ` AND e.listed_in ILIKE '%${genre_filter.replace(/'/g, "''")}%'`;
+      }
+      
+      // Cosine similarity computed in SQL
+      const query = `
+        WITH query_mag AS (
+          SELECT sqrt(sum(v * v)) as mag FROM unnest($1::double precision[]) as v
+        ),
+        similarities AS (
+          SELECT 
+            e.show_id, e.title, e.type, e.listed_in, e.description,
+            (SELECT sum(a * b) FROM unnest(e.embedding, $1::double precision[]) AS t(a, b)) 
+            / (NULLIF(sqrt((SELECT sum(v*v) FROM unnest(e.embedding) as v)) * (SELECT mag FROM query_mag), 0))
+            AS similarity
+          FROM netflix_embeddings e
+          WHERE array_length(e.embedding, 1) = array_length($1::double precision[], 1)
+          ${filterClauses}
+        )
+        SELECT * FROM similarities
+        WHERE similarity IS NOT NULL
+        ORDER BY similarity DESC
+        LIMIT ${topN}
+      `;
+      
+      const results = await sql.unsafe(query, [embedding]);
+      await sql.end();
+      return new Response(JSON.stringify({ success: true, recommendations: results }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (action === "clear-embeddings") {
       try {
         await sql`DELETE FROM netflix_embeddings`;
