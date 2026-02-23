@@ -102,7 +102,7 @@ const TrainModel = () => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [visibleLogs]);
 
-  const startTraining = async () => {
+  const startTraining = async (clearFirst = false) => {
     setTraining(true);
     setDone(false);
     setProgress(0);
@@ -110,6 +110,12 @@ const TrainModel = () => {
     setError(null);
 
     try {
+      if (clearFirst) {
+        addLog("Limpando embeddings existentes no banco externo...");
+        await apiCall("external-db", { action: "clear-embeddings" });
+        addLog("✓ Todos os embeddings foram removidos");
+      }
+
       addLog("Inicializando TensorFlow.js...");
       const tf = await import("@tensorflow/tfjs");
       await tf.ready();
@@ -206,9 +212,14 @@ const TrainModel = () => {
               <h2 className="font-display font-semibold text-foreground">Geração de Embeddings</h2>
               <p className="text-sm text-muted-foreground mt-1">TensorFlow.js • Embeddings 128-dim • Batch de {BATCH_SIZE} registros</p>
             </div>
-            <button onClick={startTraining} disabled={training} className="px-6 py-2.5 rounded-lg gradient-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed">
-              {training ? "Processando..." : "Gerar Embeddings"}
-            </button>
+            <div className="flex gap-2">
+              <button onClick={() => startTraining(true)} disabled={training} className="px-6 py-2.5 rounded-lg bg-destructive text-destructive-foreground text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed">
+                {training ? "Processando..." : "Limpar e Retreinar"}
+              </button>
+              <button onClick={() => startTraining(false)} disabled={training} className="px-6 py-2.5 rounded-lg gradient-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed">
+                {training ? "Processando..." : "Gerar Embeddings"}
+              </button>
+            </div>
           </div>
           {(training || done) && (
             <ProgressBar progress={progress} variant={done ? "success" : "primary"} label={done ? "Concluído" : `Processando embeddings... ${progress}%`} />
