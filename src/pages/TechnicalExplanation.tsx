@@ -36,90 +36,168 @@ const sections = [
 ];
 
 const codeLines = [
-  {
-    code: `const generateEmbedding = (text: string): number[] => {`,
-    comment: "Função principal que recebe um texto e retorna um vetor numérico (embedding) de 128 dimensões",
-  },
-  {
-    code: `  const embedding = new Array(128).fill(0);`,
-    comment: "Cria um vetor com 128 posições preenchidas com zero — esse será nosso embedding final",
-  },
-  {
-    code: `  const words = text.toLowerCase()`,
-    comment: "Converte todo o texto para minúsculas para normalizar a comparação",
-  },
-  {
-    code: `    .replace(/[^a-záàâãéèêíïóôõöúçñ\\s0-9]/g, "")`,
-    comment: "Remove caracteres especiais, mantendo apenas letras, números e espaços",
-  },
-  {
-    code: `    .split(/\\s+/).filter(Boolean);`,
-    comment: "Divide o texto em palavras individuais e remove strings vazias",
-  },
-  {
-    code: `  for (const word of words) {`,
-    comment: "Itera sobre cada palavra do texto para extrair suas características",
-  },
-  {
-    code: `    for (let i = 0; i < word.length; i++) {`,
-    comment: "Percorre cada caractere da palavra para gerar features posicionais",
-  },
-  {
-    code: `      const c = word.charCodeAt(i);`,
-    comment: "Obtém o código numérico Unicode do caractere (ex: 'a' = 97, 'b' = 98)",
-  },
-  {
-    code: `      embedding[(c * 31 + i * 7) % 128] += 1;`,
-    comment: "Usa hashing com primos (31, 7) para mapear cada caractere+posição a uma dimensão do vetor, incrementando o valor — isso captura a frequência dos padrões de caracteres",
-  },
-  {
-    code: `      if (i < word.length - 1) {`,
-    comment: "Verifica se existe um próximo caractere para formar um bigrama (par de caracteres consecutivos)",
-  },
-  {
-    code: `        embedding[((c * word.charCodeAt(i+1)) + i) % 128] += 0.5;`,
-    comment: "Gera uma feature de bigrama — multiplica os códigos de dois caracteres adjacentes para capturar padrões de sequência, com peso menor (0.5) que unigrama",
-  },
-  {
-    code: `      }`,
-    comment: "Fecha o bloco do bigrama",
-  },
-  {
-    code: `    }`,
-    comment: "Fecha o loop de caracteres da palavra",
-  },
-  {
-    code: `  }`,
-    comment: "Fecha o loop de palavras",
-  },
-  {
-    code: `  const mag = Math.sqrt(`,
-    comment: "Calcula a magnitude (norma L2) do vetor — é a raiz quadrada da soma dos quadrados",
-  },
-  {
-    code: `    embedding.reduce((s, v) => s + v * v, 0)`,
-    comment: "Soma o quadrado de cada valor do vetor para calcular a norma euclidiana",
-  },
-  {
-    code: `  );`,
-    comment: "Fecha o cálculo da magnitude",
-  },
-  {
-    code: `  return mag > 0`,
-    comment: "Se a magnitude é maior que zero (vetor não nulo)...",
-  },
-  {
-    code: `    ? embedding.map(v => v / mag)`,
-    comment: "...normaliza dividindo cada valor pela magnitude, criando um vetor unitário (norma = 1) — essencial para similaridade por cosseno funcionar corretamente",
-  },
-  {
-    code: `    : embedding;`,
-    comment: "Se o vetor é nulo (texto vazio), retorna o vetor de zeros como está",
-  },
-  {
-    code: `};`,
-    comment: "Fecha a função — o vetor retornado pode ser comparado com outros usando produto interno (cosseno)",
-  },
+  { section: "Pré-processamento — Vetorização do Texto", lines: [
+    {
+      code: `const textToInputVector = (text: string): number[] => {`,
+      comment: "Função que converte texto bruto em um vetor numérico de 256 dimensões para alimentar a rede neural",
+    },
+    {
+      code: `  const vec = new Array(256).fill(0);`,
+      comment: "Cria vetor de 256 posições (uma para cada código ASCII possível) — será a entrada da rede neural",
+    },
+    {
+      code: `  const clean = text.toLowerCase().replace(/[^a-z...\\s0-9]/g, "");`,
+      comment: "Normaliza o texto: converte para minúsculas e remove caracteres especiais",
+    },
+    {
+      code: `  for (let i = 0; i < clean.length; i++) {`,
+      comment: "Percorre cada caractere do texto limpo",
+    },
+    {
+      code: `    vec[clean.charCodeAt(i) % 256] += 1;`,
+      comment: "Incrementa a posição correspondente ao código do caractere — cria um histograma de frequência de caracteres (Bag-of-Characters)",
+    },
+    {
+      code: `  }`,
+      comment: "Fecha o loop de caracteres",
+    },
+    {
+      code: `  const max = Math.max(...vec, 1);`,
+      comment: "Encontra o valor máximo no vetor para normalização (mínimo 1 para evitar divisão por zero)",
+    },
+    {
+      code: `  return vec.map(v => v / max);`,
+      comment: "Normaliza todos os valores entre 0 e 1 (Min-Max Scaling) — essencial para a rede neural convergir bem",
+    },
+    {
+      code: `};`,
+      comment: "Retorna vetor de 256 dimensões normalizado — pronto para ser a entrada da rede neural",
+    },
+  ]},
+  { section: "Construção da Rede Neural — tf.sequential()", lines: [
+    {
+      code: `const buildModel = async (tf) => {`,
+      comment: "Função que constrói a arquitetura da rede neural usando a API do TensorFlow.js",
+    },
+    {
+      code: `  const model = tf.sequential();`,
+      comment: "tf.sequential() — Cria um modelo sequencial onde as camadas são empilhadas uma sobre a outra, da entrada à saída",
+    },
+    {
+      code: `  // Camada 1: Entrada → Camada Oculta`,
+      comment: "─── CAMADA 1: 256 → 512 neurônios ───",
+    },
+    {
+      code: `  model.add(tf.layers.dense({`,
+      comment: "tf.layers.dense() — Adiciona uma camada totalmente conectada (cada neurônio conecta a todos da camada anterior)",
+    },
+    {
+      code: `    inputShape: [256],`,
+      comment: "inputShape: [256] — Define que a entrada tem 256 dimensões (nosso vetor bag-of-characters)",
+    },
+    {
+      code: `    units: 512,`,
+      comment: "units: 512 — Esta camada tem 512 neurônios. Cada um aprende um padrão diferente do texto. São 256×512 + 512 = 131.584 parâmetros (pesos + biases)",
+    },
+    {
+      code: `    activation: "relu"`,
+      comment: 'activation: "relu" — ReLU (Rectified Linear Unit): f(x) = max(0, x). Introduz não-linearidade, permitindo à rede aprender padrões complexos. Neurônios negativos são zerados.',
+    },
+    {
+      code: `  }));`,
+      comment: "Fecha a definição da primeira camada oculta",
+    },
+    {
+      code: `  // Camada 2: Camada Oculta → Compressão`,
+      comment: "─── CAMADA 2: 512 → 256 neurônios ───",
+    },
+    {
+      code: `  model.add(tf.layers.dense({`,
+      comment: "Segunda camada densa — comprime a representação de 512 para 256 dimensões",
+    },
+    {
+      code: `    units: 256, activation: "relu"`,
+      comment: "256 neurônios com ReLU. São 512×256 + 256 = 131.328 parâmetros. Essa compressão força a rede a reter apenas as features mais importantes",
+    },
+    {
+      code: `  }));`,
+      comment: "Fecha a segunda camada — funciona como um 'gargalo' que filtra informação irrelevante",
+    },
+    {
+      code: `  // Camada 3: Saída — Embedding Final`,
+      comment: "─── CAMADA 3 (SAÍDA): 256 → 128 neurônios ───",
+    },
+    {
+      code: `  model.add(tf.layers.dense({`,
+      comment: "Camada final — produz o embedding de 128 dimensões que representa o filme",
+    },
+    {
+      code: `    units: 128, activation: "sigmoid"`,
+      comment: 'units: 128 — Cada dimensão do embedding. activation: "sigmoid" — Garante valores entre 0 e 1. São 256×128 + 128 = 32.896 parâmetros',
+    },
+    {
+      code: `  }));`,
+      comment: "Fecha a camada de saída — o vetor de 128 valores é o embedding do filme",
+    },
+    {
+      code: `  model.compile({`,
+      comment: "model.compile() — Configura o otimizador e a função de perda para treinamento",
+    },
+    {
+      code: `    optimizer: "adam", loss: "meanSquaredError"`,
+      comment: 'optimizer: "adam" — Algoritmo Adam (Adaptive Moment Estimation): ajusta a taxa de aprendizado automaticamente. loss: "MSE" — Erro quadrático médio entre saída prevista e esperada',
+    },
+    {
+      code: `  });`,
+      comment: "Modelo compilado com total de 295.808 parâmetros treináveis na rede neural",
+    },
+    {
+      code: `  return model;`,
+      comment: "Retorna o modelo pronto para gerar embeddings via model.predict()",
+    },
+    {
+      code: `};`,
+      comment: "Arquitetura: 256→512→256→128 (Encoder/Bottleneck pattern — similar a um Autoencoder)",
+    },
+  ]},
+  { section: "Geração do Embedding — model.predict()", lines: [
+    {
+      code: `const generateEmbedding = async (tf, text) => {`,
+      comment: "Função principal que gera o embedding de 128-dim para um texto usando a rede neural",
+    },
+    {
+      code: `  const inputVec = textToInputVector(text);`,
+      comment: "Converte o texto (título + gênero + descrição etc.) no vetor de 256 dimensões",
+    },
+    {
+      code: `  const inputTensor = tf.tensor2d([inputVec], [1, 256]);`,
+      comment: "tf.tensor2d() — Cria um tensor 2D (matriz) de shape [1, 256]: 1 amostra, 256 features. Tensores são a estrutura de dados fundamental do TensorFlow",
+    },
+    {
+      code: `  const outputTensor = tfModel.predict(inputTensor);`,
+      comment: "model.predict() — Passa o tensor pela rede neural (forward pass): 256→512→256→128. Cada neurônio aplica: output = activation(W·input + bias)",
+    },
+    {
+      code: `  const embedding = Array.from(await outputTensor.data());`,
+      comment: "outputTensor.data() — Extrai os 128 valores do tensor de saída como um array JavaScript",
+    },
+    {
+      code: `  inputTensor.dispose(); outputTensor.dispose();`,
+      comment: "tensor.dispose() — Libera a memória GPU/CPU dos tensores. Sem isso, ocorre memory leak (o garbage collector do JS não limpa tensores TF)",
+    },
+    {
+      code: `  const mag = Math.sqrt(embedding.reduce((s,v) => s+v*v, 0));`,
+      comment: "Calcula a norma L2 (magnitude) do vetor — raiz quadrada da soma dos quadrados",
+    },
+    {
+      code: `  return mag > 0 ? embedding.map(v => v / mag) : embedding;`,
+      comment: "Normaliza para vetor unitário (norma=1). Essencial para similaridade por cosseno: cos(A,B) = A·B quando ||A||=||B||=1",
+    },
+    {
+      code: `};`,
+      comment: "Retorna o embedding normalizado de 128 dimensões — pronto para comparação por similaridade",
+    },
+  ]},
 ];
 
 const TechnicalExplanation = () => {
@@ -173,52 +251,77 @@ const TechnicalExplanation = () => {
               </div>
             </div>
 
-            <div className="divide-y divide-border/50">
-              {codeLines.map((line, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: sections.length * 0.1 + i * 0.03 }}
-                  className="flex flex-col sm:flex-row gap-0 sm:gap-4 hover:bg-secondary/50 transition-colors"
-                >
-                  {/* Número da linha */}
-                  <div className="flex items-start gap-2 px-4 pt-3 sm:py-3">
-                    <span className="text-xs text-muted-foreground/50 font-mono w-5 text-right flex-shrink-0 select-none">
-                      {i + 1}
-                    </span>
-                  </div>
+            {codeLines.map((section, si) => (
+              <div key={si}>
+                {/* Section header */}
+                <div className="px-6 py-3 bg-primary/5 border-y border-border">
+                  <h4 className="font-display font-semibold text-primary text-sm">{section.section}</h4>
+                </div>
 
-                  {/* Código */}
-                  <div className="flex-1 min-w-0 px-4 sm:px-0 sm:py-3">
-                    <pre className="text-xs font-mono text-primary whitespace-pre-wrap break-all">
-                      {line.code}
-                    </pre>
-                  </div>
-
-                  {/* Explicação */}
-                  <div className="flex-1 min-w-0 px-4 pb-3 sm:py-3 sm:pr-4">
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      <span className="text-primary/40 mr-1">//</span>
-                      {line.comment}
-                    </p>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
+                <div className="divide-y divide-border/50">
+                  {section.lines.map((line, i) => (
+                    <motion.div
+                      key={`${si}-${i}`}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: sections.length * 0.1 + (si * 10 + i) * 0.02 }}
+                      className="flex flex-col sm:flex-row gap-0 sm:gap-4 hover:bg-secondary/50 transition-colors"
+                    >
+                      <div className="flex items-start gap-2 px-4 pt-3 sm:py-3">
+                        <span className="text-xs text-muted-foreground/50 font-mono w-5 text-right flex-shrink-0 select-none">
+                          {i + 1}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0 px-4 sm:px-0 sm:py-3">
+                        <pre className="text-xs font-mono text-primary whitespace-pre-wrap break-all">
+                          {line.code}
+                        </pre>
+                      </div>
+                      <div className="flex-1 min-w-0 px-4 pb-3 sm:py-3 sm:pr-4">
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          <span className="text-primary/40 mr-1">//</span>
+                          {line.comment}
+                        </p>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+            ))}
 
             {/* Resumo */}
             <div className="px-6 py-4 border-t border-border bg-secondary/30">
-              <h4 className="font-display font-semibold text-foreground text-sm mb-2">Como funciona o processo completo:</h4>
-              <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside leading-relaxed">
-                <li>O sistema busca todos os títulos da tabela <code className="text-primary bg-primary/10 px-1 rounded">netflix_titles</code> no banco externo em batches de 50</li>
-                <li>Para cada título, combina os campos <code className="text-primary bg-primary/10 px-1 rounded">title + type + listed_in + description + director + country + rating</code> em um único texto</li>
-                <li>A função <code className="text-primary bg-primary/10 px-1 rounded">generateEmbedding()</code> transforma esse texto em um vetor numérico de 128 dimensões</li>
-                <li>Usa hashing de caracteres e bigramas para mapear padrões textuais às dimensões do vetor</li>
-                <li>Normaliza o vetor para ter magnitude 1 (vetor unitário), permitindo comparação por cosseno</li>
-                <li>Os embeddings são salvos na tabela <code className="text-primary bg-primary/10 px-1 rounded">netflix_embeddings</code> no banco externo</li>
-                <li>Na recomendação, o mesmo processo é aplicado à busca do usuário e os vetores mais similares são retornados</li>
-              </ol>
+              <h4 className="font-display font-semibold text-foreground text-sm mb-2">Arquitetura da Rede Neural:</h4>
+              <div className="text-xs text-muted-foreground space-y-3 leading-relaxed">
+                <div className="flex items-center gap-2 flex-wrap font-mono">
+                  <span className="px-2 py-1 rounded bg-primary/10 text-primary">Entrada [256]</span>
+                  <span>→</span>
+                  <span className="px-2 py-1 rounded bg-primary/10 text-primary">Dense 512 (ReLU)</span>
+                  <span>→</span>
+                  <span className="px-2 py-1 rounded bg-primary/10 text-primary">Dense 256 (ReLU)</span>
+                  <span>→</span>
+                  <span className="px-2 py-1 rounded bg-primary/10 text-primary">Dense 128 (Sigmoid)</span>
+                  <span>→</span>
+                  <span className="px-2 py-1 rounded bg-success/20 text-success">Embedding [128]</span>
+                </div>
+                <ol className="space-y-1.5 list-decimal list-inside">
+                  <li><strong>Entrada (256 neurônios):</strong> Vetor bag-of-characters normalizado do texto do filme</li>
+                  <li><strong>Camada Oculta 1 (512 neurônios, ReLU):</strong> Expande a representação para capturar padrões complexos — 131.584 parâmetros</li>
+                  <li><strong>Camada Oculta 2 (256 neurônios, ReLU):</strong> Comprime a representação, forçando a rede a reter apenas features relevantes — 131.328 parâmetros</li>
+                  <li><strong>Saída (128 neurônios, Sigmoid):</strong> Produz o embedding final normalizado entre 0 e 1 — 32.896 parâmetros</li>
+                  <li><strong>Total:</strong> 295.808 parâmetros treináveis na rede</li>
+                </ol>
+                <p className="mt-2">
+                  <strong>Métodos TensorFlow.js utilizados:</strong>{" "}
+                  <code className="text-primary bg-primary/10 px-1 rounded">tf.sequential()</code>,{" "}
+                  <code className="text-primary bg-primary/10 px-1 rounded">tf.layers.dense()</code>,{" "}
+                  <code className="text-primary bg-primary/10 px-1 rounded">model.compile()</code>,{" "}
+                  <code className="text-primary bg-primary/10 px-1 rounded">model.predict()</code>,{" "}
+                  <code className="text-primary bg-primary/10 px-1 rounded">tf.tensor2d()</code>,{" "}
+                  <code className="text-primary bg-primary/10 px-1 rounded">tensor.data()</code>,{" "}
+                  <code className="text-primary bg-primary/10 px-1 rounded">tensor.dispose()</code>
+                </p>
+              </div>
             </div>
           </motion.div>
         </div>

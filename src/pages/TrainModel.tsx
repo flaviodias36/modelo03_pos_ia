@@ -20,20 +20,50 @@ const apiCall = async (fn: string, params: Record<string, string>, opts?: Reques
   return data;
 };
 
-const generateEmbedding = (text: string): number[] => {
-  const embedding = new Array(128).fill(0);
-  const words = text.toLowerCase().replace(/[^a-záàâãéèêíïóôõöúçñ\s0-9]/g, "").split(/\s+/).filter(Boolean);
-  for (const word of words) {
-    for (let i = 0; i < word.length; i++) {
-      const c = word.charCodeAt(i);
-      embedding[(c * 31 + i * 7) % 128] += 1;
-      if (i < word.length - 1) {
-        embedding[((c * word.charCodeAt(i + 1)) + i) % 128] += 0.5;
-      }
-    }
+// Vetorização de texto: converte string em vetor numérico de entrada (256-dim bag-of-chars)
+const textToInputVector = (text: string): number[] => {
+  const vec = new Array(256).fill(0);
+  const clean = text.toLowerCase().replace(/[^a-záàâãéèêíïóôõöúçñ\s0-9]/g, "");
+  for (let i = 0; i < clean.length; i++) {
+    const c = clean.charCodeAt(i) % 256;
+    vec[c] += 1;
   }
-  const mag = Math.sqrt(embedding.reduce((s: number, v: number) => s + v * v, 0));
-  return mag > 0 ? embedding.map((v: number) => v / mag) : embedding;
+  const max = Math.max(...vec, 1);
+  return vec.map(v => v / max); // normaliza entre 0 e 1
+};
+
+// Variável global para o modelo TF.js (reutilizado entre batches)
+let tfModel: any = null;
+
+const buildModel = async (tf: any) => {
+  const model = tf.sequential();
+
+  // Camada 1: Entrada 256 → 512 neurônios (ReLU)
+  model.add(tf.layers.dense({ inputShape: [256], units: 512, activation: "relu" }));
+
+  // Camada 2: 512 → 256 neurônios (ReLU) 
+  model.add(tf.layers.dense({ units: 256, activation: "relu" }));
+
+  // Camada 3: 256 → 128 neurônios (saída — embedding final)
+  model.add(tf.layers.dense({ units: 128, activation: "sigmoid" }));
+
+  model.compile({ optimizer: "adam", loss: "meanSquaredError" });
+  return model;
+};
+
+const generateEmbedding = async (tf: any, text: string): Promise<number[]> => {
+  const inputVec = textToInputVector(text);
+  const inputTensor = tf.tensor2d([inputVec], [1, 256]);
+  const outputTensor = tfModel.predict(inputTensor) as any;
+  const embedding = Array.from(await outputTensor.data()) as number[];
+
+  // Limpa tensores da memória
+  inputTensor.dispose();
+  outputTensor.dispose();
+
+  // Normaliza para vetor unitário (similaridade por cosseno)
+  const mag = Math.sqrt(embedding.reduce((s, v) => s + v * v, 0));
+  return mag > 0 ? embedding.map(v => v / mag) : embedding;
 };
 
 const TrainModel = () => {
@@ -85,6 +115,14 @@ const TrainModel = () => {
       await tf.ready();
       addLog(`✓ TensorFlow.js v${tf.version.tfjs} carregado (backend: ${tf.getBackend()})`);
 
+      addLog("Construindo rede neural: 256→512→256→128 neurônios...");
+      tfModel = await buildModel(tf);
+      addLog("✓ Modelo sequential criado — 3 camadas Dense (ReLU, ReLU, Sigmoid)");
+      addLog(`  Camada 1: Dense 256→512 (ReLU) — ${256 * 512 + 512} parâmetros`);
+      addLog(`  Camada 2: Dense 512→256 (ReLU) — ${512 * 256 + 256} parâmetros`);
+      addLog(`  Camada 3: Dense 256→128 (Sigmoid) — ${256 * 128 + 128} parâmetros`);
+      addLog(`  Total: ${(256*512+512) + (512*256+256) + (256*128+128)} parâmetros treináveis`);
+
       addLog("Criando/verificando tabela netflix_embeddings no banco externo...");
       await apiCall("external-db", { action: "create-embeddings-table" });
       addLog("✓ Tabela netflix_embeddings pronta no banco externo");
@@ -94,7 +132,6 @@ const TrainModel = () => {
       const totalTitles = Number(countData.total);
       addLog(`✓ ${totalTitles} registros encontrados`);
 
-      // Fetch all titles in batches via external-db preview
       let offset = 0;
       let processedTotal = 0;
 
@@ -105,24 +142,24 @@ const TrainModel = () => {
         addLog(`Buscando batch ${batchNum}/${totalBatches}...`);
         const fetchData = await apiCall("external-db", { action: "preview", limit: String(BATCH_SIZE), offset: String(offset) });
         
-        // The preview action doesn't support offset in current edge function
-        // Let's use the data we get
         const titles = fetchData.data;
         if (!titles || titles.length === 0) break;
 
-        addLog(`Gerando embeddings para ${titles.length} títulos via TensorFlow.js...`);
+        addLog(`Gerando embeddings para ${titles.length} títulos via rede neural TF.js...`);
 
-        const embeddingsToStore = titles.map((title: any) => {
+        const embeddingsToStore = [];
+        for (const title of titles) {
           const text = [title.title, title.type, title.listed_in, title.description, title.director, title.country, title.rating].filter(Boolean).join(" ");
-          return {
+          const embedding = await generateEmbedding(tf, text);
+          embeddingsToStore.push({
             show_id: title.show_id,
             title: title.title,
             type: title.type,
             listed_in: title.listed_in,
             description: title.description,
-            embedding: generateEmbedding(text),
-          };
-        });
+            embedding,
+          });
+        }
 
         addLog(`Salvando ${embeddingsToStore.length} embeddings...`);
         await apiCall("external-db", { action: "store-embeddings" }, {
