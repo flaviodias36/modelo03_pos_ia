@@ -175,6 +175,21 @@ serve(async (req) => {
       }
     }
 
+    if (action === "clear-embeddings") {
+      try {
+        await sql`DELETE FROM netflix_embeddings`;
+        await sql.end();
+        return new Response(JSON.stringify({ success: true, message: "Todos os embeddings foram removidos" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } catch (_) {
+        await sql.end();
+        return new Response(JSON.stringify({ success: true, message: "Tabela não existe ou já está vazia" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     await sql.end();
     return new Response(JSON.stringify({ error: "Ação inválida" }), {
       status: 400,
