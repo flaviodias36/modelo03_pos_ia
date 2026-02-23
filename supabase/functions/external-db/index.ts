@@ -1,0 +1,118 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+// Dynamic import of postgres module
+const getConnection = async () => {
+  const { default: postgres } = await import("https://deno.land/x/postgresjs@v3.4.5/mod.js");
+  
+  const sql = postgres({
+    hostname: Deno.env.get("EXTERNAL_DB_HOST")!,
+    database: Deno.env.get("EXTERNAL_DB_NAME")!,
+    username: Deno.env.get("EXTERNAL_DB_USER")!,
+    password: Deno.env.get("EXTERNAL_DB_PASSWORD")!,
+    port: 5432,
+    ssl: false,
+  });
+  
+  return sql;
+};
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const url = new URL(req.url);
+    const action = url.searchParams.get("action");
+
+    const sql = await getConnection();
+
+    if (action === "create-table") {
+      await sql`
+        CREATE TABLE IF NOT EXISTS netflix_titles (
+          show_id VARCHAR(10) PRIMARY KEY,
+          type VARCHAR(20),
+          title TEXT,
+          director TEXT,
+          "cast" TEXT,
+          country TEXT,
+          date_added TEXT,
+          release_year INTEGER,
+          rating VARCHAR(10),
+          duration VARCHAR(20),
+          listed_in TEXT,
+          description TEXT
+        )
+      `;
+      await sql.end();
+      return new Response(JSON.stringify({ success: true, message: "Tabela criada com sucesso" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "import" && req.method === "POST") {
+      const { records } = await req.json();
+      
+      let imported = 0;
+      for (const r of records) {
+        await sql`
+          INSERT INTO netflix_titles (show_id, type, title, director, "cast", country, date_added, release_year, rating, duration, listed_in, description)
+          VALUES (${r.show_id}, ${r.type}, ${r.title}, ${r.director || ''}, ${r.cast || ''}, ${r.country || ''}, ${r.date_added || ''}, ${r.release_year || null}, ${r.rating || ''}, ${r.duration || ''}, ${r.listed_in || ''}, ${r.description || ''})
+          ON CONFLICT (show_id) DO UPDATE SET
+            type = EXCLUDED.type,
+            title = EXCLUDED.title,
+            director = EXCLUDED.director,
+            "cast" = EXCLUDED."cast",
+            country = EXCLUDED.country,
+            date_added = EXCLUDED.date_added,
+            release_year = EXCLUDED.release_year,
+            rating = EXCLUDED.rating,
+            duration = EXCLUDED.duration,
+            listed_in = EXCLUDED.listed_in,
+            description = EXCLUDED.description
+        `;
+        imported++;
+      }
+      
+      await sql.end();
+      return new Response(JSON.stringify({ success: true, imported }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "count") {
+      const result = await sql`SELECT COUNT(*) as total FROM netflix_titles`;
+      await sql.end();
+      return new Response(JSON.stringify({ success: true, total: Number(result[0].total) }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "preview") {
+      const limit = url.searchParams.get("limit") || "10";
+      const result = await sql`SELECT * FROM netflix_titles LIMIT ${Number(limit)}`;
+      await sql.end();
+      return new Response(JSON.stringify({ success: true, data: result }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    await sql.end();
+    return new Response(JSON.stringify({ error: "Ação inválida" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+
+  } catch (error) {
+    console.error("Error:", error);
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});

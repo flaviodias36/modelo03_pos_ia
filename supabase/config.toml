@@ -1,1 +1,4 @@
 project_id = "rxjkdiwnukmabksbgtqq"
+
+[functions.external-db]
+verify_jwt = false
