@@ -48,7 +48,7 @@ function parseCSV(text: string) {
   return records;
 }
 
-const BATCH_SIZE = 100;
+const BATCH_SIZE = 25;
 
 const ImportCSV = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -117,8 +117,12 @@ const ImportCSV = () => {
       const totalBatches = Math.ceil(records.length / BATCH_SIZE);
       let imported = 0;
 
+      console.log(`Iniciando importação: ${records.length} registros em ${totalBatches} batches`);
+
       for (let i = 0; i < totalBatches; i++) {
         const batch = records.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
+        
+        console.log(`Enviando batch ${i + 1}/${totalBatches} (${batch.length} registros)`);
         
         const res = await fetch(
           `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/external-db?action=import`,
@@ -132,11 +136,17 @@ const ImportCSV = () => {
           }
         );
         
-        const result = await res.json();
+        const resultText = await res.text();
+        console.log(`Batch ${i + 1} response (${res.status}):`, resultText);
+        
+        let result;
+        try { result = JSON.parse(resultText); } catch { throw new Error(`Resposta inválida: ${resultText.substring(0, 200)}`); }
         if (!res.ok) throw new Error(result.error || "Erro na importação");
         
         imported += result.imported;
-        setProgress(Math.round(((i + 1) / totalBatches) * 100));
+        const pct = Math.round(((i + 1) / totalBatches) * 100);
+        console.log(`Progresso: ${pct}%`);
+        setProgress(pct);
       }
 
       setDone(true);
