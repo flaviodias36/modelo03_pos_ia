@@ -87,11 +87,6 @@ const ImportCSV = () => {
     setCreatingTable(true);
     setError(null);
     try {
-      const { data, error: fnError } = await supabase.functions.invoke("external-db", {
-        body: null,
-        headers: { "Content-Type": "application/json" },
-      });
-      // Use query param approach
       const res = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/external-db?action=create-table`,
         {
