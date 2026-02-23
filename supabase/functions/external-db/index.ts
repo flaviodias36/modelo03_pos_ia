@@ -108,7 +108,8 @@ serve(async (req) => {
 
     if (action === "preview") {
       const limit = url.searchParams.get("limit") || "10";
-      const result = await sql`SELECT * FROM netflix_titles LIMIT ${Number(limit)}`;
+      const offset = url.searchParams.get("offset") || "0";
+      const result = await sql`SELECT * FROM netflix_titles ORDER BY show_id LIMIT ${Number(limit)} OFFSET ${Number(offset)}`;
       await sql.end();
       return new Response(JSON.stringify({ success: true, data: result }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

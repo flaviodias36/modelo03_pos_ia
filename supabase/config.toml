@@ -2,3 +2,6 @@ project_id = "rxjkdiwnukmabksbgtqq"
 
 [functions.external-db]
 verify_jwt = false
+
+[functions.train-model]
+verify_jwt = false
