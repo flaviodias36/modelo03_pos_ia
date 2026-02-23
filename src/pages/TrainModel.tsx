@@ -88,19 +88,20 @@ const TrainModel = () => {
   }, []);
 
   const fetchStats = useCallback(async () => {
+    let total = 0;
+    let vec = 0;
     try {
-      const [countData, embData] = await Promise.all([
-        apiCall("external-db", { action: "count" }),
-        apiCall("external-db", { action: "embedding-count" }),
-      ]);
-      const total = Number(countData.total);
-      const vec = Number(embData.count);
-      setStats({ total, vectorized: vec, remaining: total - vec });
+      const countData = await apiCall("external-db", { action: "count" });
+      total = Number(countData.total);
+    } catch { /* silent */ }
+    try {
+      const embData = await apiCall("external-db", { action: "embedding-count" });
+      vec = Number(embData.count) || 0;
     } catch {
-      // silent
-    } finally {
-      setLoadingStats(false);
+      vec = 0;
     }
+    setStats({ total, vectorized: vec, remaining: total - vec });
+    setLoadingStats(false);
   }, []);
 
   useEffect(() => { fetchStats(); }, [fetchStats, done]);
