@@ -39,9 +39,9 @@ export function Sidebar() {
           <motion.span
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="font-display font-bold text-foreground text-lg whitespace-nowrap"
+            className="font-display font-bold text-foreground text-sm whitespace-nowrap overflow-hidden"
           >
-            Modulo 3 - Treinamento de Neural
+            Módulo 3 - Rede Neural
           </motion.span>
         )}
       </div>
