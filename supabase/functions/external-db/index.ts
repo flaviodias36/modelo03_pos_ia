@@ -35,16 +35,16 @@ serve(async (req) => {
     if (action === "create-table") {
       await sql`
         CREATE TABLE IF NOT EXISTS netflix_titles (
-          show_id VARCHAR(10) PRIMARY KEY,
-          type VARCHAR(20),
+          show_id TEXT PRIMARY KEY,
+          type TEXT,
           title TEXT,
           director TEXT,
           "cast" TEXT,
           country TEXT,
           date_added TEXT,
           release_year INTEGER,
-          rating VARCHAR(10),
-          duration VARCHAR(20),
+          rating TEXT,
+          duration TEXT,
           listed_in TEXT,
           description TEXT
         )
