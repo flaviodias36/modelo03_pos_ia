@@ -41,7 +41,7 @@ export function Sidebar() {
             animate={{ opacity: 1 }}
             className="font-display font-bold text-foreground text-lg whitespace-nowrap"
           >
-            RecLab AI
+            Modulo 3 - Treinamento de Neural
           </motion.span>
         )}
       </div>
