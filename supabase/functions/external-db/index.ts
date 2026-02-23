@@ -60,6 +60,14 @@ serve(async (req) => {
     if (action === "import" && req.method === "POST") {
       const { records } = await req.json();
       
+      // Auto-fix schema: alter VARCHAR columns to TEXT if needed
+      try {
+        await sql`ALTER TABLE netflix_titles ALTER COLUMN show_id TYPE TEXT`;
+        await sql`ALTER TABLE netflix_titles ALTER COLUMN type TYPE TEXT`;
+        await sql`ALTER TABLE netflix_titles ALTER COLUMN rating TYPE TEXT`;
+        await sql`ALTER TABLE netflix_titles ALTER COLUMN duration TYPE TEXT`;
+      } catch (_) { /* columns may already be TEXT */ }
+      
       // Batch insert using a transaction
       let imported = 0;
       await sql.begin(async (tx: any) => {
