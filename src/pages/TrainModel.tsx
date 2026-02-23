@@ -11,13 +11,20 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 const apiCall = async (fn: string, params: Record<string, string>, opts?: RequestInit) => {
   const query = new URLSearchParams(params).toString();
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/${fn}?${query}`, {
-    ...opts,
-    headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json", ...(opts?.headers || {}) },
-  });
-  const data = await res.json();
-  if (!res.ok || data.error) throw new Error(data.error || "Request failed");
-  return data;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/${fn}?${query}`, {
+      ...opts,
+      signal: controller.signal,
+      headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json", ...(opts?.headers || {}) },
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || "Request failed");
+    return data;
+  } finally {
+    clearTimeout(timeout);
+  }
 };
 
 // Vetorização de texto: converte string em vetor numérico de entrada (256-dim bag-of-chars)
@@ -112,8 +119,12 @@ const TrainModel = () => {
     try {
       if (clearFirst) {
         addLog("Limpando embeddings existentes no banco externo...");
-        await apiCall("external-db", { action: "clear-embeddings" });
-        addLog("✓ Todos os embeddings foram removidos");
+        try {
+          await apiCall("external-db", { action: "clear-embeddings" });
+          addLog("✓ Todos os embeddings foram removidos");
+        } catch (e: any) {
+          addLog(`⚠ Limpeza falhou (${e.message}) — continuando mesmo assim...`);
+        }
       }
 
       addLog("Inicializando TensorFlow.js...");
