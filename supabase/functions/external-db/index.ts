@@ -5,7 +5,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Dynamic import of postgres module
 const getConnection = async () => {
   const { default: postgres } = await import("https://deno.land/x/postgresjs@v3.4.5/mod.js");
   
@@ -26,15 +25,18 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  let sql;
   try {
     const url = new URL(req.url);
     const action = url.searchParams.get("action");
 
-    const sql = await getConnection();
+    sql = await getConnection();
 
     if (action === "create-table") {
+      // Drop and recreate to ensure correct schema
+      await sql`DROP TABLE IF EXISTS netflix_titles`;
       await sql`
-        CREATE TABLE IF NOT EXISTS netflix_titles (
+        CREATE TABLE netflix_titles (
           show_id TEXT PRIMARY KEY,
           type TEXT,
           title TEXT,
@@ -58,26 +60,29 @@ serve(async (req) => {
     if (action === "import" && req.method === "POST") {
       const { records } = await req.json();
       
+      // Batch insert using a transaction
       let imported = 0;
-      for (const r of records) {
-        await sql`
-          INSERT INTO netflix_titles (show_id, type, title, director, "cast", country, date_added, release_year, rating, duration, listed_in, description)
-          VALUES (${r.show_id}, ${r.type}, ${r.title}, ${r.director || ''}, ${r.cast || ''}, ${r.country || ''}, ${r.date_added || ''}, ${r.release_year || null}, ${r.rating || ''}, ${r.duration || ''}, ${r.listed_in || ''}, ${r.description || ''})
-          ON CONFLICT (show_id) DO UPDATE SET
-            type = EXCLUDED.type,
-            title = EXCLUDED.title,
-            director = EXCLUDED.director,
-            "cast" = EXCLUDED."cast",
-            country = EXCLUDED.country,
-            date_added = EXCLUDED.date_added,
-            release_year = EXCLUDED.release_year,
-            rating = EXCLUDED.rating,
-            duration = EXCLUDED.duration,
-            listed_in = EXCLUDED.listed_in,
-            description = EXCLUDED.description
-        `;
-        imported++;
-      }
+      await sql.begin(async (tx: any) => {
+        for (const r of records) {
+          await tx`
+            INSERT INTO netflix_titles (show_id, type, title, director, "cast", country, date_added, release_year, rating, duration, listed_in, description)
+            VALUES (${r.show_id || ''}, ${r.type || ''}, ${r.title || ''}, ${r.director || ''}, ${r.cast || ''}, ${r.country || ''}, ${r.date_added || ''}, ${r.release_year ? parseInt(String(r.release_year)) : null}, ${r.rating || ''}, ${r.duration || ''}, ${r.listed_in || ''}, ${r.description || ''})
+            ON CONFLICT (show_id) DO UPDATE SET
+              type = EXCLUDED.type,
+              title = EXCLUDED.title,
+              director = EXCLUDED.director,
+              "cast" = EXCLUDED."cast",
+              country = EXCLUDED.country,
+              date_added = EXCLUDED.date_added,
+              release_year = EXCLUDED.release_year,
+              rating = EXCLUDED.rating,
+              duration = EXCLUDED.duration,
+              listed_in = EXCLUDED.listed_in,
+              description = EXCLUDED.description
+          `;
+          imported++;
+        }
+      });
       
       await sql.end();
       return new Response(JSON.stringify({ success: true, imported }), {
@@ -110,6 +115,7 @@ serve(async (req) => {
 
   } catch (error) {
     console.error("Error:", error);
+    if (sql) try { await sql.end(); } catch (_) {}
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
