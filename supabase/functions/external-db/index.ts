@@ -162,15 +162,17 @@ serve(async (req) => {
 
     if (action === "embedding-count") {
       try {
-        const result = await sql`SELECT COUNT(*) as total FROM netflix_embeddings`;
+        const result = await sql`SELECT COUNT(*)::int as total FROM netflix_embeddings`;
+        console.log("Embedding count from external DB:", result[0].total);
         await sql.end();
         return new Response(JSON.stringify({ success: true, count: Number(result[0].total) }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-cache, no-store" },
         });
-      } catch (_) {
+      } catch (e) {
+        console.log("Embedding count error:", e.message);
         await sql.end();
         return new Response(JSON.stringify({ success: true, count: 0 }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-cache, no-store" },
         });
       }
     }
