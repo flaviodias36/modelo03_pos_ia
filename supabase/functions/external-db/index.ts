@@ -116,6 +116,65 @@ serve(async (req) => {
       });
     }
 
+    if (action === "create-embeddings-table") {
+      await sql`
+        CREATE TABLE IF NOT EXISTS netflix_embeddings (
+          id SERIAL PRIMARY KEY,
+          show_id TEXT NOT NULL UNIQUE,
+          title TEXT,
+          type TEXT,
+          listed_in TEXT,
+          description TEXT,
+          embedding DOUBLE PRECISION[] NOT NULL,
+          created_at TIMESTAMP DEFAULT NOW()
+        )
+      `;
+      await sql.end();
+      return new Response(JSON.stringify({ success: true, message: "Tabela netflix_embeddings criada no banco externo" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "store-embeddings" && req.method === "POST") {
+      const { embeddings } = await req.json();
+      let stored = 0;
+      await sql.begin(async (tx: any) => {
+        for (const e of embeddings) {
+          await tx`
+            INSERT INTO netflix_embeddings (show_id, title, type, listed_in, description, embedding)
+            VALUES (${e.show_id}, ${e.title || ''}, ${e.type || ''}, ${e.listed_in || ''}, ${e.description || ''}, ${e.embedding})
+            ON CONFLICT (show_id) DO UPDATE SET
+              title = EXCLUDED.title,
+              type = EXCLUDED.type,
+              listed_in = EXCLUDED.listed_in,
+              description = EXCLUDED.description,
+              embedding = EXCLUDED.embedding,
+              created_at = NOW()
+          `;
+          stored++;
+        }
+      });
+      await sql.end();
+      return new Response(JSON.stringify({ success: true, stored }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (action === "embedding-count") {
+      try {
+        const result = await sql`SELECT COUNT(*) as total FROM netflix_embeddings`;
+        await sql.end();
+        return new Response(JSON.stringify({ success: true, count: Number(result[0].total) }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } catch (_) {
+        await sql.end();
+        return new Response(JSON.stringify({ success: true, count: 0 }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     await sql.end();
     return new Response(JSON.stringify({ error: "Ação inválida" }), {
       status: 400,
